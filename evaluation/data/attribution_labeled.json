@@ -1,0 +1,105 @@
+{
+  "description": "Labeled anomaly-description -> MITRE ATT&CK technique dataset for evaluating attack attribution (RAG vs zero-shot). Each item lists acceptable technique IDs (a description can legitimately map to more than one).",
+  "examples": [
+    {
+      "anomaly_description": "Workstation transferred 4.2GB of encrypted files to an external IP at 2AM over an established outbound TCP channel after running a PowerShell script.",
+      "source_ip": "192.168.1.45",
+      "gold_ids": ["T1041", "T1048"]
+    },
+    {
+      "anomaly_description": "A user received an email with a malicious attachment impersonating the IT department asking them to enable macros.",
+      "source_ip": "10.0.0.7",
+      "gold_ids": ["T1566"]
+    },
+    {
+      "anomaly_description": "Thousands of rapid failed login attempts against the VPN gateway from a single external host within one minute.",
+      "source_ip": "203.0.113.9",
+      "gold_ids": ["T1110"]
+    },
+    {
+      "anomaly_description": "Sequential connection attempts to 5000 TCP ports on a single internal server, characteristic of a port scan.",
+      "source_ip": "198.51.100.4",
+      "gold_ids": ["T1046", "T1595"]
+    },
+    {
+      "anomaly_description": "PowerShell spawned by a Word document executed a base64-encoded command that downloaded a payload.",
+      "source_ip": "192.168.1.22",
+      "gold_ids": ["T1059"]
+    },
+    {
+      "anomaly_description": "A dormant service account suddenly authenticated from a new geography and accessed several database servers.",
+      "source_ip": "192.168.1.60",
+      "gold_ids": ["T1078"]
+    },
+    {
+      "anomaly_description": "Massive volume of spoofed UDP traffic flooded the web server, saturating its bandwidth and causing an outage.",
+      "source_ip": "203.0.113.55",
+      "gold_ids": ["T1498", "T1499"]
+    },
+    {
+      "anomaly_description": "An attacker used stolen RDP credentials to open a remote desktop session to a finance workstation.",
+      "source_ip": "198.51.100.20",
+      "gold_ids": ["T1021"]
+    },
+    {
+      "anomaly_description": "Beaconing HTTPS traffic to a suspicious domain at fixed 60-second intervals indicative of command-and-control.",
+      "source_ip": "192.168.1.31",
+      "gold_ids": ["T1071", "T1041"]
+    },
+    {
+      "anomaly_description": "A scheduled task was created to run a suspicious binary every time the system boots to maintain persistence.",
+      "source_ip": "192.168.1.14",
+      "gold_ids": ["T1053"]
+    },
+    {
+      "anomaly_description": "Credential dumping tool accessed LSASS memory to extract plaintext passwords and hashes.",
+      "source_ip": "192.168.1.77",
+      "gold_ids": ["T1003"]
+    },
+    {
+      "anomaly_description": "Malware injected code into a legitimate running process to evade detection.",
+      "source_ip": "192.168.1.88",
+      "gold_ids": ["T1055"]
+    },
+    {
+      "anomaly_description": "Adversary encrypted files across multiple file shares and dropped a ransom note demanding payment.",
+      "source_ip": "192.168.1.90",
+      "gold_ids": ["T1486"]
+    },
+    {
+      "anomaly_description": "Network reconnaissance enumerating internal hosts and open SMB shares across the subnet.",
+      "source_ip": "192.168.1.101",
+      "gold_ids": ["T1046", "T1135"]
+    },
+    {
+      "anomaly_description": "An attacker modified the registry Run key to launch malware automatically at user logon.",
+      "source_ip": "192.168.1.112",
+      "gold_ids": ["T1547"]
+    },
+    {
+      "anomaly_description": "Large database export followed by upload to a personal cloud storage service over HTTPS.",
+      "source_ip": "192.168.1.44",
+      "gold_ids": ["T1048", "T1567"]
+    },
+    {
+      "anomaly_description": "Suspicious use of Windows Management Instrumentation to execute commands on remote hosts.",
+      "source_ip": "192.168.1.33",
+      "gold_ids": ["T1047"]
+    },
+    {
+      "anomaly_description": "An adversary cleared Windows event logs to remove evidence of their activity.",
+      "source_ip": "192.168.1.19",
+      "gold_ids": ["T1070"]
+    },
+    {
+      "anomaly_description": "Phishing email contained a link to a fake Microsoft 365 login page harvesting credentials.",
+      "source_ip": "10.0.0.3",
+      "gold_ids": ["T1566", "T1598"]
+    },
+    {
+      "anomaly_description": "A newly created local administrator account was added to the Domain Admins group.",
+      "source_ip": "192.168.1.5",
+      "gold_ids": ["T1136", "T1098"]
+    }
+  ]
+}

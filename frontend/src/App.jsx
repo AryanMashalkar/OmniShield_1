@@ -2,10 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import { ShieldAlert, Activity, ShieldCheck, Server, AlertTriangle, Terminal, Database, Shield, History } from 'lucide-react';
 import axios from 'axios';
 
-// Demo-only shared secret — MUST match OMNISHIELD_API_KEY on the backend.
-// For anything beyond a hackathon demo, this belongs in a proper auth flow,
-// not a frontend constant (anyone can read this in devtools).
-const API_KEY = 'omnishield-dev-key-2026';
+// API key is read from the Vite environment (frontend/.env ->
+// VITE_OMNISHIELD_API_KEY) and MUST match OMNISHIELD_API_KEY on the backend.
+// It is no longer hard-coded in source. NOTE: any key shipped to a browser is
+// readable in devtools — for production this should be replaced by a real
+// user-auth flow (this env var is a dev/demo convenience only).
+const API_KEY = import.meta.env.VITE_OMNISHIELD_API_KEY || '';
+if (!API_KEY) {
+  console.warn(
+    'VITE_OMNISHIELD_API_KEY is not set. SOAR isolation calls will be rejected. ' +
+    'Create frontend/.env from frontend/.env.example and set it to match the backend.'
+  );
+}
 
 // Helper function to format raw bytes into KB, MB, GB
 const formatBytes = (bytes) => {
@@ -104,7 +112,9 @@ export default function App() {
     try {
       await axios.post(
         'http://127.0.0.1:8000/api/block-ip',
-        { target_ip: activeTargetIp },
+        // analyst_confirmed=true: clicking this button IS the human-in-the-loop
+        // authorisation the backend requires before executing containment.
+        { target_ip: activeTargetIp, analyst_confirmed: true },
         { headers: { 'X-API-Key': API_KEY } }
       );
 

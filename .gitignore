@@ -1,0 +1,30 @@
+# --- Python ---
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# --- OmniShield local state / secrets ---
+.env
+frontend/.env
+omnishield.db
+chroma_db/
+chroma_db_mitre/
+
+# --- Large cached datasets (regenerated on first run) ---
+mitre_attack_cache.json
+nsl_kdd_cache.csv
+
+# --- Evaluation output (timestamped runs) ---
+evaluation/results/*.json
+
+# --- Frontend ---
+node_modules/
+frontend/dist/
+frontend/node_modules/
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
