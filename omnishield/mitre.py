@@ -2,10 +2,17 @@
 
 Parses the cached STIX bundle into LangChain ``Document`` objects (top-level
 techniques only) for embedding into the vector store used by RAG attribution.
+
+Each document is enriched for retrieval quality: the technique's tactic(s) and a
+cleaned, fuller description are embedded alongside the ID and name, so a natural-
+language anomaly description ("thousands of failed logins against the VPN") lands
+near the right technique ("Brute Force", tactic: credential access) instead of a
+sparse ID+first-line stub.
 """
 
 import json
 import os
+import re
 import urllib.request
 
 from langchain_core.documents import Document
@@ -15,7 +22,11 @@ MITRE_ATTACK_URL = (
     "enterprise-attack/enterprise-attack.json"
 )
 MITRE_CACHE_FILE = "mitre_attack_cache.json"
-MAX_TECHNIQUES = 250
+# High enough to cover every top-level Enterprise technique (~200). Sub-techniques
+# (IDs containing ".") are rolled up to their parent and skipped below.
+MAX_TECHNIQUES = 2000
+# Cap embedded description length so one long technique can't dominate an embedding.
+MAX_DESC_CHARS = 600
 
 FALLBACK_MITRE_DOCS = [
     Document(
@@ -43,6 +54,36 @@ FALLBACK_MITRE_DOCS = [
         metadata={"id": "T1078", "name": "Valid Accounts"},
     ),
 ]
+
+_CITATION_RE = re.compile(r"\(Citation:.*?\)", re.DOTALL)
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_CODE_RE = re.compile(r"<code>(.*?)</code>", re.DOTALL)
+_WS_RE = re.compile(r"\s+")
+
+
+def _clean_description(text: str) -> str:
+    """Strip MITRE's citation markup / markdown / HTML into clean prose."""
+    if not text:
+        return ""
+    text = _CITATION_RE.sub("", text)
+    text = _CODE_RE.sub(r"\1", text)
+    text = _MD_LINK_RE.sub(r"\1", text)
+    text = text.replace("*", "").replace("`", "")
+    text = _WS_RE.sub(" ", text).strip()
+    if len(text) > MAX_DESC_CHARS:
+        text = text[:MAX_DESC_CHARS].rsplit(" ", 1)[0] + "..."
+    return text
+
+
+def _tactics(obj: dict) -> list[str]:
+    """Human-readable tactic names from the STIX kill_chain_phases."""
+    tactics = []
+    for phase in obj.get("kill_chain_phases", []):
+        if phase.get("kill_chain_name") == "mitre-attack":
+            name = phase.get("phase_name", "").replace("-", " ").strip()
+            if name and name not in tactics:
+                tactics.append(name)
+    return tactics
 
 
 def fetch_mitre_stix_bundle() -> dict:
@@ -84,12 +125,19 @@ def load_mitre_documents() -> list[Document]:
             continue
 
         name = obj.get("name", "Unknown Technique")
-        description = (obj.get("description") or "").split("\n")[0]
+        description = _clean_description(obj.get("description") or "")
+        tactics = _tactics(obj)
+        tactic_line = f" Tactics: {', '.join(tactics)}." if tactics else ""
+
+        # Rich, retrieval-friendly text: ID, name, tactic(s), then clean prose.
+        page_content = (
+            f"Technique {attack_id}: {name}.{tactic_line} {description}"
+        ).strip()
 
         docs.append(
             Document(
-                page_content=f"Technique ID: {attack_id} - {name}. {description}",
-                metadata={"id": attack_id, "name": name},
+                page_content=page_content,
+                metadata={"id": attack_id, "name": name, "tactics": ", ".join(tactics)},
             )
         )
 

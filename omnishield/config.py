@@ -64,15 +64,41 @@ class Settings:
         # --- Models ---------------------------------------------------------
         self.llm_model: str = os.environ.get("OMNISHIELD_LLM_MODEL", "llama3.1:8b")
         self.embed_model: str = os.environ.get("OMNISHIELD_EMBED_MODEL", "nomic-embed-text")
+        # Deterministic, bounded generation so attribution is reproducible and the
+        # benchmark numbers are stable run-to-run.
+        self.llm_temperature: float = _get_float("OMNISHIELD_LLM_TEMPERATURE", 0.0)
+        self.llm_num_predict: int = _get_int("OMNISHIELD_LLM_NUM_PREDICT", 256)
+        # RAG retrieval depth (candidate techniques shown to the LLM).
+        self.rag_top_k: int = _get_int("OMNISHIELD_RAG_TOP_K", 6)
 
         # --- Storage --------------------------------------------------------
         self.db_path: str = os.environ.get("OMNISHIELD_DB_PATH", "omnishield.db")
         self.chroma_dir: str = os.environ.get("OMNISHIELD_CHROMA_DIR", "./chroma_db_mitre")
 
+        # --- Dataset --------------------------------------------------------
+        # Pluggable network-traffic dataset adapter. "nsl_kdd" (default, cached
+        # automatically) or "unsw_nb15" (modern; drop the CSV in and point
+        # OMNISHIELD_UNSW_CSV at it).
+        self.dataset: str = os.environ.get("OMNISHIELD_DATASET", "nsl_kdd").strip().lower()
+        self.unsw_csv: str = os.environ.get(
+            "OMNISHIELD_UNSW_CSV", "UNSW_NB15_training-set.csv"
+        )
+        self.cic_csv: str = os.environ.get("OMNISHIELD_CIC_CSV", "cic_ids2017.csv")
+
         # --- Detection ------------------------------------------------------
         self.baseline_window_size: int = _get_int("OMNISHIELD_BASELINE_WINDOW", 40)
         self.anomaly_z_threshold: float = _get_float("OMNISHIELD_Z_THRESHOLD", 3.0)
         self.min_baseline_samples: int = _get_int("OMNISHIELD_MIN_BASELINE", 10)
+
+        # --- Multivariate live detector (IsolationForest) -------------------
+        # The production upgrade: a multivariate one-class detector that backs
+        # the live stream alongside the z-score fast path. Fitted once on NSL-KDD
+        # normal traffic at startup.
+        self.multivariate_enabled: bool = _get_bool("OMNISHIELD_MULTIVARIATE", True)
+        self.multivariate_contamination: float = _get_float(
+            "OMNISHIELD_MV_CONTAMINATION", 0.1
+        )
+        self.multivariate_train_limit: int = _get_int("OMNISHIELD_MV_TRAIN_LIMIT", 40000)
 
         # --- Live stream ----------------------------------------------------
         # "simulate" = NSL-KDD normal samples + scripted exfil (original demo).

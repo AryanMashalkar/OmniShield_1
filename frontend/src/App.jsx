@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ShieldAlert, Activity, ShieldCheck, Server, AlertTriangle, Terminal, Database, Shield, History } from 'lucide-react';
+import { ShieldAlert, Activity, ShieldCheck, Server, AlertTriangle, Terminal, Database, Shield, History, GitBranch, Crosshair } from 'lucide-react';
 import axios from 'axios';
 
 // API key is read from the Vite environment (frontend/.env ->
@@ -33,8 +33,12 @@ export default function App() {
   const [systemStatus, setSystemStatus] = useState('SECURE'); // SECURE, AT_RISK, NEUTRALIZED
   const [isIsolating, setIsIsolating] = useState(false); // guards against duplicate/concurrent block-ip calls
   const [triggerZScore, setTriggerZScore] = useState(null);
+  const [triggerDetector, setTriggerDetector] = useState(null);
+  const [triggerMvScore, setTriggerMvScore] = useState(null);
   const [activeTargetIp, setActiveTargetIp] = useState('185.199.108.153'); 
   const [incidents, setIncidents] = useState([]); // RESTORED STATE
+  const [campaigns, setCampaigns] = useState([]); // correlated incidents (per-host stories)
+  const [detStats, setDetStats] = useState({ labeled: 0, correct: 0 }); // live accuracy (replay ground truth)
   const logsEndRef = useRef(null);
 
   // Keep a ref mirror of systemStatus so the WebSocket's onmessage handler
@@ -63,8 +67,25 @@ export default function App() {
       setLogs((prev) => [...prev.slice(-49), log]);
       setEventsScanned((prev) => prev + 1);
 
-      // Flag stream anomalies z >= 3.0, but only escalate to AI if payload exceeds 500 KB
-      if (log.is_anomaly && log.bytes_transferred > 500000 && systemStatusRef.current !== 'NEUTRALIZED') {
+      // Live self-scoring: in replay mode every frame carries ground truth, so we
+      // can show detection accuracy on screen in real time.
+      if (typeof log.detection_correct === 'boolean') {
+        setDetStats((prev) => ({
+          labeled: prev.labeled + 1,
+          correct: prev.correct + (log.detection_correct ? 1 : 0),
+        }));
+      }
+
+      // Escalate to AI attribution ONLY when transitioning from a calm state.
+      // Once an alert is pinned (AT_RISK) or contained (NEUTRALIZED) the live
+      // stream must never overwrite it — that back-to-back re-triggering was
+      // what made the panel flash and disappear. A pinned alert stays until the
+      // analyst dismisses it (or isolates), then the next anomaly can escalate.
+      const isEscalatable = log.is_anomaly && (log.mv_flag || log.bytes_transferred > 500000);
+      if (isEscalatable && systemStatusRef.current === 'SECURE') {
+        // Pin synchronously so any packets arriving in the same tick can't
+        // double-trigger before React re-renders and updates the ref.
+        systemStatusRef.current = 'AT_RISK';
         setSystemStatus('AT_RISK');
         setActiveTargetIp(log.destination_ip || log.source_ip);
         triggerAiAnalysis(log);
@@ -79,6 +100,19 @@ export default function App() {
     fetchIncidents();
   }, []);
 
+  // Poll the correlation engine so the Active Incidents panel updates live.
+  useEffect(() => {
+    const fetchCampaigns = async () => {
+      try {
+        const r = await axios.get('http://127.0.0.1:8000/api/campaigns?limit=6');
+        setCampaigns(r.data.campaigns || []);
+      } catch (e) { /* backend not up yet */ }
+    };
+    fetchCampaigns();
+    const id = setInterval(fetchCampaigns, 3000);
+    return () => clearInterval(id);
+  }, []);
+
   const fetchIncidents = async () => {
     try {
       const response = await axios.get('http://127.0.0.1:8000/api/incidents?limit=10');
@@ -91,17 +125,35 @@ export default function App() {
   const triggerAiAnalysis = async (anomalyLog) => {
     setIsAnalyzing(true);
     setTriggerZScore(anomalyLog.anomaly_score ?? null);
+    setTriggerDetector(anomalyLog.detector ?? null);
+    setTriggerMvScore(anomalyLog.mv_score ?? null);
     try {
       const response = await axios.post('http://127.0.0.1:8000/api/attribute-attack', {
         anomaly_description: anomalyLog.anomaly_description,
         source_ip: anomalyLog.source_ip,
-        anomaly_score: anomalyLog.anomaly_score ?? null
+        anomaly_score: anomalyLog.anomaly_score ?? null,
+        // Send raw byte volume so the backend's semantic-translation layer can
+        // rule out physically-impossible attributions (0 bytes != exfiltration).
+        bytes_transferred: anomalyLog.bytes_transferred ?? null
       });
       setAiAlert(response.data);
     } catch (error) {
       console.error("AI Analysis failed:", error);
     }
     setIsAnalyzing(false);
+  };
+
+  // Clear the pinned Threat Intelligence panel and resume live monitoring.
+  // This is the ONLY way (besides isolation) that a displayed alert goes away —
+  // normal background traffic can never clear it.
+  const dismissAlert = () => {
+    setAiAlert(null);
+    setIsAnalyzing(false);
+    setTriggerZScore(null);
+    setTriggerDetector(null);
+    setTriggerMvScore(null);
+    systemStatusRef.current = 'SECURE';
+    setSystemStatus('SECURE');
   };
 
   // RESTORED FUNCTION
@@ -119,6 +171,7 @@ export default function App() {
       );
 
       setSystemStatus('NEUTRALIZED');
+      systemStatusRef.current = 'NEUTRALIZED';
       setAiAlert(null);
       alert(`Windows Defender Firewall Rule Injected: Target IP ${activeTargetIp} Blocked.`);
       fetchIncidents();
@@ -162,6 +215,12 @@ export default function App() {
           <div>
             <p className="text-slate-500 text-xs uppercase font-bold">Events Scanned</p>
             <p className="text-2xl font-bold text-white">{eventsScanned.toLocaleString()}</p>
+            {detStats.labeled > 0 && (
+              <p className="text-[11px] text-emerald-400 font-semibold">
+                Detection accuracy {((detStats.correct / detStats.labeled) * 100).toFixed(1)}% · MTTD &lt;1s
+                <span className="text-slate-600"> ({detStats.labeled} labeled)</span>
+              </p>
+            )}
           </div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex items-center gap-4">
@@ -201,6 +260,9 @@ export default function App() {
           <div className="flex items-center gap-2 mb-4 text-slate-400 border-b border-slate-800 pb-2">
             <Database className="w-5 h-5 text-blue-500" />
             <h2 className="font-semibold text-lg">Packet Inspection Stream</h2>
+            <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500 bg-slate-950 border border-slate-800 rounded px-2 py-1">
+              Detection: z-score + IsolationForest
+            </span>
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-2 text-sm custom-scrollbar">
@@ -218,13 +280,27 @@ export default function App() {
                     <span className="text-emerald-400">{log.destination_ip}</span>
                   </span>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
                   <span className={log.is_anomaly ? 'text-red-400 font-bold' : 'text-slate-500'}>
                     {formatBytes(log.bytes_transferred)}
                   </span>
                   {log.is_anomaly && (
                     <span className="text-xs bg-red-900/50 text-red-300 px-2 py-1 rounded animate-pulse">
-                      THREAT DETECTED{typeof log.anomaly_score === 'number' && log.anomaly_score > 0 ? ` · z=${log.anomaly_score}` : ''}
+                      THREAT · {log.mv_flag ? 'IForest' : 'z-score'}
+                    </span>
+                  )}
+                  {log.ground_truth_label && (
+                    <span className={`text-[10px] px-2 py-1 rounded border whitespace-nowrap ${
+                      log.ground_truth_label === 'normal'
+                        ? 'border-slate-700 text-slate-500'
+                        : 'border-amber-800/60 text-amber-400 bg-amber-950/20'
+                    }`} title="Ground-truth label from the NSL-KDD benchmark (replay mode)">
+                      truth: {log.ground_truth_label}
+                      {typeof log.detection_correct === 'boolean' && (
+                        <span className={log.detection_correct ? 'text-emerald-400 ml-1 font-bold' : 'text-red-400 ml-1 font-bold'}>
+                          {log.detection_correct ? '✓' : '✗'}
+                        </span>
+                      )}
                     </span>
                   )}
                 </div>
@@ -248,6 +324,11 @@ export default function App() {
               </div>
               <h3 className="text-xl font-bold text-white">Threat Neutralized</h3>
               <p className="text-slate-400 text-center text-sm">Container isolated successfully via SOAR playbook. Network integrity restored.</p>
+              <button
+                onClick={dismissAlert}
+                className="mt-2 px-4 py-2 rounded-lg text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
+                Resume Monitoring
+              </button>
             </div>
           ) : isAnalyzing ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
@@ -261,39 +342,92 @@ export default function App() {
                 <div>
                   <h3 className="text-red-400 font-bold text-lg leading-none mb-1">CRITICAL THREAT</h3>
                   <p className="text-slate-300 text-sm">AI Confidence: <span className="font-bold text-white">{aiAlert.confidence_score}%</span></p>
-                  {typeof triggerZScore === 'number' && triggerZScore > 0 && (
-                    <p className="text-slate-500 text-xs mt-1">Flagged by rolling detector: z-score {triggerZScore} (≥3.0 threshold)</p>
-                  )}
+                  {triggerDetector === 'IsolationForest' ? (
+                    <p className="text-slate-500 text-xs mt-1">Flagged by multivariate IsolationForest{typeof triggerMvScore === 'number' ? ` (anomaly score ${triggerMvScore})` : ''} — behavioural profile, not byte volume</p>
+                  ) : (typeof triggerZScore === 'number' && triggerZScore > 0 && (
+                    <p className="text-slate-500 text-xs mt-1">Flagged by rolling z-score {triggerZScore} (≥3.0 threshold)</p>
+                  ))}
                 </div>
               </div>
 
-              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex-1 shadow-inner">
-                <h4 className="text-slate-500 text-xs uppercase mb-1 font-bold">MITRE ATT&CK Framework</h4>
-                <p className="text-blue-400 font-bold mb-6 text-lg border-b border-slate-800 pb-2">
-                  {aiAlert.matched_technique_id} - {aiAlert.technique_name}
-                </p>
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1 custom-scrollbar">
+                <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 shadow-inner">
+                  <h4 className="text-slate-500 text-xs uppercase mb-1 font-bold">MITRE ATT&CK Framework</h4>
+                  <p className="text-blue-400 font-bold mb-6 text-lg border-b border-slate-800 pb-2">
+                    {aiAlert.matched_technique_id} - {aiAlert.technique_name}
+                  </p>
 
-                <h4 className="text-slate-500 text-xs uppercase mb-2 font-bold">AI Recommended Action</h4>
-                <p className="text-slate-300 text-sm leading-relaxed">{aiAlert.recommended_action}</p>
+                  <h4 className="text-slate-500 text-xs uppercase mb-2 font-bold">AI Recommended Action</h4>
+                  <p className="text-slate-300 text-sm leading-relaxed">{aiAlert.recommended_action}</p>
+                </div>
+
+                {aiAlert.next_moves && (
+                  <div className="bg-slate-950 p-4 rounded-lg border border-amber-900/40 shadow-inner">
+                    <div className="flex items-center gap-2 mb-2">
+                      <GitBranch className="w-4 h-4 text-amber-400" />
+                      <h4 className="text-amber-400/90 text-xs uppercase font-bold tracking-wide">Predicted Attacker Next Moves</h4>
+                    </div>
+                    {aiAlert.next_moves.terminal ? (
+                      <p className="text-amber-400 text-sm leading-relaxed">
+                        ⚠ Terminal <span className="font-bold">Impact</span> stage — this is the objective. Isolate now and verify backup / recovery readiness.
+                      </p>
+                    ) : aiAlert.next_moves.predictions?.length ? (
+                      <div className="space-y-3">
+                        <p className="text-slate-500 text-[11px] mb-1">
+                          Current stage: <span className="text-slate-300 font-semibold uppercase">{aiAlert.next_moves.current_tactic}</span> — kill-chain forecast:
+                        </p>
+                        {aiAlert.next_moves.predictions.map((p, i) => (
+                          <div key={i} className="border-l-2 border-amber-800/50 pl-3">
+                            <p className="text-amber-400 text-xs font-bold uppercase">{i + 1}. {p.tactic}</p>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {p.techniques.map((t) => (
+                                <span key={t.id} title={t.name}
+                                  className="text-[10px] bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-slate-300">
+                                  {t.id}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="text-slate-500 text-[10px] mt-1">↳ {p.defence}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm">{aiAlert.next_moves.message}</p>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <button
-                onClick={isolateNetwork}
-                disabled={isIsolating}
-                className={`w-full font-bold py-4 rounded-lg transition-all flex items-center justify-center gap-2 ${
-                  isIsolating
-                    ? 'bg-red-900/50 text-red-300 cursor-not-allowed'
-                    : 'bg-red-600 hover:bg-red-500 active:bg-red-700 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)] hover:shadow-[0_0_30px_rgba(220,38,38,0.6)]'
-                }`}>
-                <ShieldAlert className="w-5 h-5" />
-                {isIsolating ? 'ISOLATING...' : 'EXECUTE SOAR ISOLATION'}
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={isolateNetwork}
+                  disabled={isIsolating}
+                  className={`w-full font-bold py-4 rounded-lg transition-all flex items-center justify-center gap-2 ${
+                    isIsolating
+                      ? 'bg-red-900/50 text-red-300 cursor-not-allowed'
+                      : 'bg-red-600 hover:bg-red-500 active:bg-red-700 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)] hover:shadow-[0_0_30px_rgba(220,38,38,0.6)]'
+                  }`}>
+                  <ShieldAlert className="w-5 h-5" />
+                  {isIsolating ? 'ISOLATING...' : 'EXECUTE SOAR ISOLATION'}
+                </button>
+                <button
+                  onClick={dismissAlert}
+                  disabled={isIsolating}
+                  className="w-full py-2 rounded-lg text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 disabled:opacity-50">
+                  Dismiss &amp; resume monitoring
+                </button>
+              </div>
             </div>
           ) : aiAlert && aiAlert.parse_error ? (
             <div className="flex flex-col items-center justify-center h-full text-yellow-500 space-y-3 text-center px-4">
               <AlertTriangle className="w-12 h-12" />
               <h3 className="text-lg font-bold text-white">AI Classification Failed</h3>
               <p className="text-slate-400 text-sm">{aiAlert.recommended_action || "The model didn't return a valid response. Manual review recommended."}</p>
+              <button
+                onClick={dismissAlert}
+                className="mt-2 px-4 py-2 rounded-lg text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
+                Dismiss &amp; resume monitoring
+              </button>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-slate-600">
@@ -303,6 +437,57 @@ export default function App() {
           )}
         </div>
 
+      </div>
+
+      {/* ACTIVE INCIDENTS — correlated per-host campaigns */}
+      <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 mb-6">
+        <div className="flex items-center gap-2 mb-4 text-slate-400 border-b border-slate-800 pb-2">
+          <Crosshair className="w-5 h-5 text-amber-500" />
+          <h2 className="font-semibold text-lg">Active Incidents <span className="text-slate-600 text-sm font-normal">· correlated by host</span></h2>
+          {campaigns.length > 0 && (
+            <span className="ml-auto text-xs bg-amber-950/40 text-amber-400 border border-amber-900/50 rounded-full px-3 py-1">{campaigns.length} active</span>
+          )}
+        </div>
+
+        {campaigns.length === 0 ? (
+          <p className="text-slate-600 italic text-sm">No correlated incidents yet — weak signals are grouped by source host as they arrive.</p>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {campaigns.map((c) => {
+              const nm = c.forecast || {};
+              const nextTactics = (nm.predictions || []).map((p) => p.tactic);
+              return (
+                <div key={c.entity} className={`p-3 rounded border bg-slate-950 ${c.stage_span >= 2 ? 'border-amber-900/50' : 'border-slate-800'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-blue-400 font-bold">{c.entity}</span>
+                    <span className="text-[10px] text-slate-500">{c.anomaly_count} anomalies · {c.duration_sec}s</span>
+                  </div>
+
+                  {c.stages && c.stages.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-1 mb-2">
+                      {c.stages.map((s, i) => (
+                        <span key={i} className="flex items-center gap-1">
+                          <span className="text-[10px] uppercase bg-red-950/40 text-red-300 border border-red-900/50 rounded px-2 py-0.5">{s}</span>
+                          {i < c.stages.length - 1 && <span className="text-slate-600 text-xs">→</span>}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500 text-xs mb-2">Repeated anomalies — no attributed technique yet.{c.categories?.length ? ` (${c.categories.join(', ')})` : ''}</p>
+                  )}
+
+                  {nm.terminal ? (
+                    <p className="text-amber-400 text-xs"><GitBranch className="w-3 h-3 inline mr-1" />Terminal Impact stage — isolate now.</p>
+                  ) : nextTactics.length > 0 ? (
+                    <p className="text-amber-400/90 text-xs">
+                      <GitBranch className="w-3 h-3 inline mr-1" />Forecast next: <span className="font-semibold">{nextTactics.join(' → ')}</span>
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* INCIDENT LOG (full width) */}

@@ -1,168 +1,88 @@
-"""Network traffic datasets (NSL-KDD).
+"""Pluggable network-traffic dataset dispatcher.
 
-Provides three things:
+Selects the active dataset adapter via ``OMNISHIELD_DATASET``:
 
-1. ``load_normal_traffic_samples`` — (protocol, byte_count) tuples used for the
-   simulated live background traffic (original behaviour).
-2. ``load_labeled_records`` — full labeled records (normal + attacks) used by
-   the replay stream mode and the detection evaluation harness.
-3. ``load_feature_matrix`` — a numeric feature matrix + binary labels
-   (0 = normal, 1 = attack) for the ML anomaly-detection baselines.
+    "nsl_kdd"   (default) — refined KDDCup'99, auto-cached, works offline.
+    "unsw_nb15"           — modern (2015) set; drop the CSV in and point
+                            OMNISHIELD_UNSW_CSV at it.
+    "cic_ids"             — CIC-IDS-2017 (gold standard); point
+                            OMNISHIELD_CIC_CSV at a MachineLearningCVE flow CSV.
 
-NSL-KDD is a well-known published intrusion-detection benchmark (a refined
-KDDCup'99). The cached CSV has 42 columns, label at index 41, no header.
+Every adapter exposes the same interface, so the detection pipeline, the live
+WebSocket stream and the evaluation harness are completely dataset-agnostic:
+
+    DATASET_NAME
+    SRC_BYTES_FEATURE_IDX / DST_BYTES_FEATURE_IDX   (byte-signal positions)
+    CATEGORY_PHRASE                                  (attack-category -> English)
+    attack_category(label)
+    load_feature_matrix(limit)          -> (X, y, byte_signal)
+    load_labeled_records(limit, shuffle)-> list[record dict]
+    load_normal_feature_samples()       -> list[{protocol, bytes, features}]
+    sample_feature_packet(samples)      -> (protocol, bytes, features)
+
+Adding a new dataset (CIC-IDS-2017, ToN_IoT, live Zeek/NetFlow, ...) is a matter
+of writing one more adapter module with this same surface.
 """
 
-import csv
-import io
-import os
-import random
-import urllib.request
-
-NSL_KDD_URL = (
-    "https://raw.githubusercontent.com/Mamcose/"
-    "NSL-KDD-Network-Intrusion-Detection/master/NSL_KDD_Train.csv"
-)
-NSL_KDD_CACHE_FILE = "nsl_kdd_cache.csv"
-MAX_PACKET_BYTES_DISPLAY = 200_000
-
-# Standard NSL-KDD column layout (42 cols; label at index 41).
-PROTOCOL_COL = 1
-SRC_BYTES_COL = 4
-DST_BYTES_COL = 5
-LABEL_COL = 41
-
-# Numeric continuous feature columns used for the ML baselines. We skip the
-# three categorical columns (protocol_type, service, flag) and the label.
-NUMERIC_FEATURE_COLS = [
-    0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-    23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
-]
+from .config import settings
 
 
-def fetch_nsl_kdd_raw() -> str:
-    if os.path.exists(NSL_KDD_CACHE_FILE):
-        with open(NSL_KDD_CACHE_FILE, "r", encoding="utf-8") as f:
-            return f.read()
+def _select_adapter():
+    """Pick the adapter for OMNISHIELD_DATASET.
 
-    print("[OmniShield] Downloading NSL-KDD dataset (first run only)...")
-    with urllib.request.urlopen(NSL_KDD_URL, timeout=60) as response:
-        raw = response.read().decode("utf-8", errors="ignore")
-
-    with open(NSL_KDD_CACHE_FILE, "w", encoding="utf-8") as f:
-        f.write(raw)
-
-    return raw
-
-
-def _iter_rows():
-    raw = fetch_nsl_kdd_raw()
-    for row in csv.reader(io.StringIO(raw)):
-        if len(row) < 42:
-            continue
-        yield row
-
-
-def load_normal_traffic_samples() -> list[tuple[str, int]]:
-    """(protocol, byte_count) for 'normal'-labeled records only."""
-    try:
-        rows = list(_iter_rows())
-    except Exception as e:  # pragma: no cover - network / IO failure path
-        print(f"[WARNING] Could not fetch NSL-KDD ({e}). Using synthetic packet sizes.")
-        return []
-
-    samples: list[tuple[str, int]] = []
-    for row in rows:
-        if row[LABEL_COL] != "normal":
-            continue
-        try:
-            total = int(row[SRC_BYTES_COL]) + int(row[DST_BYTES_COL])
-        except ValueError:
-            continue
-        if total <= 0:
-            continue
-        samples.append((row[PROTOCOL_COL].upper(), total))
-
-    if not samples:
-        print("[WARNING] Parsed 0 usable NSL-KDD samples. Using synthetic packet sizes.")
-        return []
-
-    print(f"[OmniShield] Loaded {len(samples)} normal NSL-KDD traffic samples.")
-    return samples
-
-
-def load_labeled_records(limit: int | None = None, shuffle: bool = False) -> list[dict]:
-    """Full labeled records (normal + attacks) for replay / evaluation.
-
-    Each record: {protocol, src_ip, dst_ip, bytes, label, is_attack, attack_type}.
-    Source/destination IPs are synthetic (NSL-KDD has none) but deterministic
-    per record so a replay looks coherent.
+    Modern datasets (UNSW-NB15, CIC-IDS-2017) are gated user-supplied CSVs. If
+    the selected one's file is missing we fall back to NSL-KDD (which self-caches)
+    with a loud warning — so a mis-set env var degrades to a working demo instead
+    of crashing the live stream / eval.
     """
-    rows = list(_iter_rows())
-    if shuffle:
-        random.shuffle(rows)
-    if limit is not None:
-        rows = rows[:limit]
+    name = settings.dataset
+    if name in ("unsw_nb15", "unsw", "unsw-nb15"):
+        from . import datasets_unsw as adapter
+    elif name in ("cic_ids", "cic", "cic_ids2017", "cic-ids-2017", "cicids2017"):
+        from . import datasets_cic as adapter
+    else:
+        from . import datasets_nsl as adapter
+        return adapter
 
-    records: list[dict] = []
-    for i, row in enumerate(rows):
-        try:
-            total = int(row[SRC_BYTES_COL]) + int(row[DST_BYTES_COL])
-        except ValueError:
-            continue
-        label = row[LABEL_COL]
-        is_attack = label != "normal"
-        records.append(
-            {
-                "protocol": row[PROTOCOL_COL].upper(),
-                "src_ip": f"192.168.1.{10 + (i % 240)}",
-                "dst_ip": f"10.0.0.{1 + (i % 250)}" if not is_attack
-                else f"185.199.{i % 255}.{(i * 7) % 255}",
-                "bytes": max(total, 0),
-                "label": label,
-                "is_attack": is_attack,
-                "attack_type": None if not is_attack else label,
-            }
+    if not adapter.is_available():
+        from . import datasets_nsl as nsl
+
+        print(
+            f"\n[OmniShield][WARNING] OMNISHIELD_DATASET='{name}' was selected but its "
+            f"dataset file was not found.\n"
+            f"    Falling back to NSL-KDD so the stream/eval keep working. Set the CSV "
+            f"path (OMNISHIELD_UNSW_CSV / OMNISHIELD_CIC_CSV) to use the modern set.\n"
         )
-    return records
+        return nsl
+    return adapter
 
 
-def load_feature_matrix(limit: int | None = None):
-    """Return (X, y, byte_signal) as numpy arrays.
+_adapter = _select_adapter()
 
-    X          : (n, d) numeric feature matrix for ML baselines.
-    y          : (n,) binary labels — 0 normal, 1 attack.
-    byte_signal: (n,) src+dst byte totals — the univariate signal used by the
-                 project's streaming z-score / EWMA detectors.
-    """
-    import numpy as np
-
-    rows = list(_iter_rows())
-    if limit is not None:
-        rows = rows[:limit]
-
-    feats: list[list[float]] = []
-    labels: list[int] = []
-    bytes_sig: list[float] = []
-    for row in rows:
-        try:
-            vec = [float(row[c]) for c in NUMERIC_FEATURE_COLS]
-        except ValueError:
-            continue
-        feats.append(vec)
-        labels.append(0 if row[LABEL_COL] == "normal" else 1)
-        bytes_sig.append(float(row[SRC_BYTES_COL]) + float(row[DST_BYTES_COL]))
-
-    return (
-        np.asarray(feats, dtype=float),
-        np.asarray(labels, dtype=int),
-        np.asarray(bytes_sig, dtype=float),
-    )
+# --- Re-exported per-dataset constants (resolved once, at import) -----------
+DATASET_NAME = _adapter.DATASET_NAME
+SRC_BYTES_FEATURE_IDX = _adapter.SRC_BYTES_FEATURE_IDX
+DST_BYTES_FEATURE_IDX = _adapter.DST_BYTES_FEATURE_IDX
+CATEGORY_PHRASE = _adapter.CATEGORY_PHRASE
+MITRE_HINTS = getattr(_adapter, "MITRE_HINTS", {})
 
 
-def sample_packet(samples: list[tuple[str, int]]) -> tuple[str, int]:
-    """One simulated background packet (protocol, bytes)."""
-    if samples:
-        protocol, total = random.choice(samples)
-        return protocol, min(total, MAX_PACKET_BYTES_DISPLAY)
-    return random.choice(["TCP", "UDP", "ICMP"]), random.randint(100, 5000)
+# --- Delegated adapter interface -------------------------------------------
+def attack_category(label):
+    return _adapter.attack_category(label)
+
+
+def load_feature_matrix(limit=None):
+    return _adapter.load_feature_matrix(limit=limit)
+
+
+def load_labeled_records(limit=None, shuffle=False):
+    return _adapter.load_labeled_records(limit=limit, shuffle=shuffle)
+
+
+def load_normal_feature_samples():
+    return _adapter.load_normal_feature_samples()
+
+
+def sample_feature_packet(samples):
+    return _adapter.sample_feature_packet(samples)

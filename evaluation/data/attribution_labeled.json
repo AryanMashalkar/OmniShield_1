@@ -1,5 +1,5 @@
 {
-  "description": "Labeled anomaly-description -> MITRE ATT&CK technique dataset for evaluating attack attribution (RAG vs zero-shot). Each item lists acceptable technique IDs (a description can legitimately map to more than one).",
+  "description": "Labeled anomaly-description -> MITRE ATT&CK technique dataset for evaluating attack attribution (RAG vs zero-shot). Each item lists acceptable top-level technique IDs (a description can legitimately map to more than one). Sub-technique IDs are intentionally rolled up to their parent technique, matching the top-level-technique knowledge base OmniShield embeds.",
   "examples": [
     {
       "anomaly_description": "Workstation transferred 4.2GB of encrypted files to an external IP at 2AM over an established outbound TCP channel after running a PowerShell script.",
@@ -100,6 +100,106 @@
       "anomaly_description": "A newly created local administrator account was added to the Domain Admins group.",
       "source_ip": "192.168.1.5",
       "gold_ids": ["T1136", "T1098"]
+    },
+    {
+      "anomaly_description": "An unpatched internet-facing web server was compromised through a vulnerability in its application to gain an initial foothold.",
+      "source_ip": "203.0.113.77",
+      "gold_ids": ["T1190"]
+    },
+    {
+      "anomaly_description": "An adversary authenticated to internet-exposed corporate remote services from an unmanaged external device to enter the network.",
+      "source_ip": "198.51.100.31",
+      "gold_ids": ["T1133"]
+    },
+    {
+      "anomaly_description": "A compromised host used certutil to download additional attacker tooling from an external server.",
+      "source_ip": "192.168.1.66",
+      "gold_ids": ["T1105"]
+    },
+    {
+      "anomaly_description": "The dropped binary was heavily packed and its strings were base64 and XOR obfuscated to defeat static analysis.",
+      "source_ip": "192.168.1.71",
+      "gold_ids": ["T1027"]
+    },
+    {
+      "anomaly_description": "Outbound traffic was relayed through a chain of intermediary proxy nodes to conceal the true command-and-control destination.",
+      "source_ip": "192.168.1.83",
+      "gold_ids": ["T1090"]
+    },
+    {
+      "anomaly_description": "Sensitive documents were compressed into a password-protected RAR archive shortly before an outbound transfer.",
+      "source_ip": "192.168.1.52",
+      "gold_ids": ["T1560"]
+    },
+    {
+      "anomaly_description": "A process systematically read and collected documents and spreadsheets from the user's local drive.",
+      "source_ip": "192.168.1.58",
+      "gold_ids": ["T1005"]
+    },
+    {
+      "anomaly_description": "Malware periodically captured screenshots of the victim's desktop and saved them locally.",
+      "source_ip": "192.168.1.63",
+      "gold_ids": ["T1113"]
+    },
+    {
+      "anomaly_description": "A keylogger hooked the keyboard to record every keystroke, capturing credentials as the user typed.",
+      "source_ip": "192.168.1.64",
+      "gold_ids": ["T1056"]
+    },
+    {
+      "anomaly_description": "The attacker stopped the antivirus and database services on the host to prepare it for ransomware deployment.",
+      "source_ip": "192.168.1.91",
+      "gold_ids": ["T1489"]
+    },
+    {
+      "anomaly_description": "A malicious DLL was executed via rundll32.exe to run code under a trusted signed Windows binary.",
+      "source_ip": "192.168.1.93",
+      "gold_ids": ["T1218"]
+    },
+    {
+      "anomaly_description": "An adversary exploited a vulnerable kernel driver to escalate privileges from a standard user to SYSTEM.",
+      "source_ip": "192.168.1.95",
+      "gold_ids": ["T1068"]
+    },
+    {
+      "anomaly_description": "The attacker exploited an SMB service vulnerability on a peer host to move laterally without credentials.",
+      "source_ip": "192.168.1.97",
+      "gold_ids": ["T1210"]
+    },
+    {
+      "anomaly_description": "Before encrypting data, the ransomware deleted volume shadow copies to prevent system recovery.",
+      "source_ip": "192.168.1.99",
+      "gold_ids": ["T1490"]
+    },
+    {
+      "anomaly_description": "Files from several servers were copied into a single staging directory prior to bulk exfiltration.",
+      "source_ip": "192.168.1.103",
+      "gold_ids": ["T1074"]
+    },
+    {
+      "anomaly_description": "Enumeration of all domain user accounts was performed using net user /domain from a compromised host.",
+      "source_ip": "192.168.1.105",
+      "gold_ids": ["T1087"]
+    },
+    {
+      "anomaly_description": "Commands were run to gather the host's OS version, hostname, domain, and hardware details.",
+      "source_ip": "192.168.1.107",
+      "gold_ids": ["T1082"]
+    },
+    {
+      "anomaly_description": "An adversary accessed and exported the full mailbox contents of a company executive.",
+      "source_ip": "192.168.1.109",
+      "gold_ids": ["T1114"]
+    },
+    {
+      "anomaly_description": "AnyDesk remote access software was silently installed to give the attacker persistent interactive control.",
+      "source_ip": "192.168.1.111",
+      "gold_ids": ["T1219"]
+    },
+    {
+      "anomaly_description": "Stolen data was tunneled out over DNS queries to bypass egress filtering and web proxies.",
+      "source_ip": "192.168.1.115",
+      "gold_ids": ["T1572", "T1048"]
     }
   ]
 }

@@ -24,9 +24,10 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 
 from evaluation._common import print_table, save_results  # noqa: E402
-from omnishield.datasets import load_feature_matrix  # noqa: E402
+from omnishield.datasets import DATASET_NAME, load_feature_matrix  # noqa: E402
 from omnishield.detection import (  # noqa: E402
     EWMADetector,
+    HybridZScoreIForestDetector,
     IsolationForestDetector,
     OneClassSVMDetector,
     PCAReconstructionDetector,
@@ -94,7 +95,7 @@ def main():
     args = ap.parse_args()
     limit = None if args.limit == 0 else args.limit
 
-    print(f"[eval_detection] Loading NSL-KDD feature matrix (limit={limit})...")
+    print(f"[eval_detection] Loading {DATASET_NAME} feature matrix (limit={limit})...")
     X_train, X_test, y_test, b_test = build_split(limit)
     print(
         f"[eval_detection] train(normal)={len(X_train)}  "
@@ -107,6 +108,7 @@ def main():
         (IsolationForestDetector(), False),
         (OneClassSVMDetector(), False),
         (PCAReconstructionDetector(), False),
+        (HybridZScoreIForestDetector(), False),  # the live pipeline's rule
     ]
 
     results = []
@@ -123,7 +125,7 @@ def main():
     )
 
     payload = {
-        "dataset": "NSL-KDD",
+        "dataset": DATASET_NAME,
         "limit": limit,
         "train_normal": len(X_train),
         "test_size": len(y_test),
